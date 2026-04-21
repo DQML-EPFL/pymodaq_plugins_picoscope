@@ -6,6 +6,7 @@ from pymodaq.utils.parameter import Parameter
 
 from ...hardware.Picoscope4000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000
 from ...hardware.Picoscope4000a_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000a
+from ...hardware.Picoscope2000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper2000
 
 
 class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
@@ -26,7 +27,7 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         {"title": "Picoscope Series Version",
          "name": "pico_type",
          "type": "itemselect",
-         "value": dict(all_items=["Picoscope 4000", "Picoscope 4000a"], selected=["Picoscope 4000a"])
+         "value": dict(all_items=["Picoscope 2000", "Picoscope 4000", "Picoscope 4000a"], selected=["Picoscope 4000a"])
         } ,
 
         {'title':'Aquisition Parameters : Need to Reload Detector if changed !!',
@@ -49,6 +50,7 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
 
         if self.settings.child('pico_type').value()["selected"][0] == "Picoscope 4000": self.controller: Picoscope_Wrapper4000 = None
         elif self.settings.child('pico_type').value()["selected"][0] == "Picoscope 4000a": self.controller: Picoscope_Wrapper4000a = None
+        elif self.settings.child('pico_type').value()["selected"][0] == "Picoscope 2000": self.controller: Picoscope_Wrapper2000 = None
         
         self.x_axis = None
         self.pico = None
@@ -123,6 +125,14 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
                                                     trigger = self.settings.child('aquisition_param', 'trig_lvl').value(),
                                                     trigger_chan = trigger_channel_number
                                                     )  #instantiate you driver with whatever arguments are needed
+            elif self.settings.child('pico_type').value()["selected"][0] == "Picoscope 2000": 
+                print("Initialise 2000")
+                self.controller = Picoscope_Wrapper2000( 
+                                                    aquire_time = self.settings.child('aquisition_param', 'aquisition_time').value()*1e-3,
+                                                    sampling_freq = self.settings.child('aquisition_param', 'sampling_freq').value(),
+                                                    trigger = self.settings.child('aquisition_param', 'trig_lvl').value(),
+                                                    trigger_chan = trigger_channel_number
+                                                    )  # 
             else: 
                 print("Problem +")
 
