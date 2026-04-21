@@ -21,7 +21,7 @@ class Picoscope_Wrapper:
         Max Sampling Freq = 80 MHz
         """
         self.aquire_time = aquire_time
-        self.num_points = sampling_freq*1e6 *aquire_time 
+        self.num_points = sampling_freq * 1e6 *aquire_time 
         self.sampling_frequency = sampling_freq
     
         self.preTriggerSamples = 100
@@ -61,12 +61,12 @@ class Picoscope_Wrapper:
         
         # Stop the scope
         handle = self.chandle
-        self.status["stop"] = ps.ps2000Stop(handle)
+        self.status["stop"] = ps.ps2000_stop(handle)
         assert_pico2000_ok(self.status["stop"])
 
         # Close unit / Disconnect the scope
         handle = self.chandle
-        self.status["close"] = ps.ps2000CloseUnit(handle)
+        self.status["close"] = ps.ps2000_close_unit(handle)
         assert_pico2000_ok(self.status["close"])
 
 
@@ -132,7 +132,7 @@ class Picoscope_Wrapper:
         noSamples = self.maxSamples
         pointer_to_timeInterval = ctypes.byref(timeInterval)
         pointer_to_timeUnits = ctypes.byref(timeUnits)
-        self.oversample = 1 = oversample
+        self.oversample = oversample
         pointer_to_maxSamples = ctypes.byref(maxSamplesReturn)
 
         self.status["getTimebase2"] = ps.ps2000_get_timebase(handle, self.timebase, noSamples, pointer_to_timeInterval, pointer_to_timeUnits, oversample, pointer_to_maxSamples)
@@ -268,5 +268,19 @@ class Picoscope_Wrapper:
         #        manager.close()
 
 
-# pico = Picoscope_Wrapper()
-# pico.start_a_grab_snap()
+if __name__=="__main__":
+
+    pico = Picoscope_Wrapper(aquire_time=.5, 
+                             sampling_freq=0.20, 
+                             trigger=500, 
+                             trigger_chan=1)
+    
+    time, data = pico.start_a_grab_snap()
+
+    data_A = data[0]
+    data_B = data[1]
+
+    import matplotlib.pyplot as plt
+    plt.plot(time, data_A)
+    plt.plot(time, data_B)
+    plt.show()
