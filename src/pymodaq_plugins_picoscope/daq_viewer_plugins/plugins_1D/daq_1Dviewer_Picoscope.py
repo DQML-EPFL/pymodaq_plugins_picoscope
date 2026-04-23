@@ -4,9 +4,9 @@ from pymodaq.utils.data import DataFromPlugins, Axis, DataToExport
 from pymodaq.control_modules.viewer_utility_classes import DAQ_Viewer_base, comon_parameters, main
 from pymodaq.utils.parameter import Parameter
 
-from ...hardware.Picoscope4000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000
-from ...hardware.Picoscope4000a_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000a
-from ...hardware.Picoscope2000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper2000
+from pymodaq_plugins_picoscope.hardware.Picoscope4000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000
+from pymodaq_plugins_picoscope.hardware.Picoscope4000a_wrapper import Picoscope_Wrapper as Picoscope_Wrapper4000a
+from pymodaq_plugins_picoscope.hardware.Picoscope2000_wrapper import Picoscope_Wrapper as Picoscope_Wrapper2000
 
 
 class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
@@ -27,7 +27,7 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         {"title": "Picoscope Series Version",
          "name": "pico_type",
          "type": "itemselect",
-         "value": dict(all_items=["Picoscope 2000", "Picoscope 4000", "Picoscope 4000a"], selected=["Picoscope 4000a"])
+         "value": dict(all_items=["Picoscope 2000", "Picoscope 4000", "Picoscope 4000a"], selected=["Picoscope 2000"])
         } ,
 
         {'title':'Aquisition Parameters : Need to Reload Detector if changed !!',
@@ -38,7 +38,8 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
              {'title':'Sampling Frequency (MHz)', 'name':'sampling_freq', 'type':'float', 'value':0.2, 'default':0.2 },
              {'title':'Number of Samples (kS)', 'name':'num_samples', 'type':'float', 'value':2, 'default':2, 'readonly':True },
              {'title':'Trigger Channel', 'name':'trig_chan', 'type':'itemselect', 'value':dict(all_items=["A", "B", "External"], selected=["B"])},
-             {'title':'Trigger Level (mV)', 'name':'trig_lvl', 'type':'float', 'value':500, 'default':500 } ]
+             {'title':'Trigger Level (mV)', 'name':'trig_lvl', 'type':'float', 'value':100, 'default':500 },
+             {'title':'Voltage Range','name':'voltage_range','type':'list','limits': {'±50 mV': 2,'±100 mV': 3,'±200 mV': 4,'±500 mV': 5,'±1 V': 6,'±2 V': 7,'±5 V': 8,'±10 V': 9}, 'value': 5,'default': 5} ]
         } ,
 
         ]
@@ -68,7 +69,6 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
             A given parameter (within detector_settings) whose value has been changed by the user
         """
 
-        print("Commit setting : ", param)
         if param.name() == "aquisition_time":   # TODO: Find a way to set Timebase while initialised
             sampling_freq = self.settings.child('aquisition_param', 'sampling_freq').value()
             aquire_time = param.value()
@@ -116,7 +116,7 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
                                                     sampling_freq = self.settings.child('aquisition_param', 'sampling_freq').value(),
                                                     trigger = self.settings.child('aquisition_param', 'trig_lvl').value(),
                                                     trigger_chan = trigger_channel_number
-                                                    )  #
+                                                    )  # TODO : implement voltage range
             elif self.settings.child('pico_type').value()["selected"][0] == "Picoscope 4000a": 
                 print("Initialise 4000a")
                 self.controller = Picoscope_Wrapper4000a( 
@@ -124,15 +124,16 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
                                                     sampling_freq = self.settings.child('aquisition_param', 'sampling_freq').value(),
                                                     trigger = self.settings.child('aquisition_param', 'trig_lvl').value(),
                                                     trigger_chan = trigger_channel_number
-                                                    )  #instantiate you driver with whatever arguments are needed
+                                                    )  # TODO : implement voltage range
             elif self.settings.child('pico_type').value()["selected"][0] == "Picoscope 2000": 
                 print("Initialise 2000")
                 self.controller = Picoscope_Wrapper2000( 
                                                     aquire_time = self.settings.child('aquisition_param', 'aquisition_time').value()*1e-3,
                                                     sampling_freq = self.settings.child('aquisition_param', 'sampling_freq').value(),
                                                     trigger = self.settings.child('aquisition_param', 'trig_lvl').value(),
-                                                    trigger_chan = trigger_channel_number
-                                                    )  # 
+                                                    trigger_chan = trigger_channel_number,
+                                                    voltage_range = self.settings.child('aquisition_param', 'voltage_range').value(), 
+                                                    )  # TODO : implement pre_trig
             else: 
                 print("Problem +")
 
@@ -149,8 +150,6 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         self.controller.__del__()
 
 
-
-
     def grab_data(self, Naverage=1, **kwargs):
         """Start a grab from the detector
 
@@ -162,22 +161,22 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         kwargs: dict
             others optionals arguments
         """
-        ##synchrone version (blocking function)
         time, channels = self.controller.start_a_grab_snap()
 
-        self.process_and_show_data(time, channels)
+        ChannelA = channels[0]
+        ChannelB = channels[1]
+
+        self.x_axis = Axis(data=self.controller.get_the_x_axis(), label='Time', units="s", index=0)
+
+        dwa1D = DataFromPlugins(name='Channel B', data=[ChannelA, ChannelB], dim='Data1D', labels=['Channel A', 'Channel B'], do_plot=True, axes=[self.x_axis])
+
+        data = DataToExport('Picoscope', data=[ dwa1D ])
+
+        self.dte_signal.emit(data)
 
 
 
-    def process_and_show_data(self, time, channels):
-            ChannelA = channels[0]
-            ChannelB = channels[1]
 
-            dwa1D3 = DataFromPlugins(name='Channel B', data=[ChannelA, ChannelB], dim='Data1D', labels=['Channel A', 'Channel B'], do_plot=True)
-
-            data = DataToExport('Picoscope', data=[ dwa1D3 ])
-
-            self.dte_signal.emit(data)
     
 
 

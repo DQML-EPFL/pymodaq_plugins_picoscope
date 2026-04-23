@@ -5,6 +5,8 @@ Created on Mon Feb 3 2025
 @author: dqml-lab
 """
 
+# https://www.picotech.com/download/manuals/picoscope-2000-series-programmers-guide.pdf
+
 import ctypes
 import numpy as np
 from picosdk.ps2000 import ps2000 as ps
@@ -16,44 +18,41 @@ class Picoscope_Wrapper:
 
     ############## My methods
 
-    def __init__(self, aquire_time=.5, sampling_freq=0.20, trigger=500, trigger_chan=1) -> None:
+    def __init__(self, aquire_time=.5, sampling_freq=0.20, trigger=500, trigger_chan=1, voltage_range=6) -> None:
         """
         Max Sampling Freq = 80 MHz
         """
-        self.aquire_time = aquire_time
-        self.num_points = sampling_freq * 1e6 *aquire_time 
-        self.sampling_frequency = sampling_freq
-    
-        self.preTriggerSamples = 100
-        self.postTriggerSamples = int( self.num_points - self.preTriggerSamples)
-        self.trigger_chan_number = trigger_chan
 
-        self.maxSamples = int(self.preTriggerSamples + self.postTriggerSamples)
-        self.timebase = int( 80/sampling_freq - 1 )  # Page 24 of PG
-        self.timebase = 8 # As per exemple for now
+        print("========= Initializing Picoscope ================")
+
+        self.desired_sampling_freq = sampling_freq
+        self.aquire_time = aquire_time
+
+        self.timebase = self.get_closest_timebase()
+        self.maxSamples = self.get_numSamples()
+
+        self.trigger_chan_number = trigger_chan
+        self.preTriggerSamples = 100
+        self.postTriggerSamples = self.maxSamples - self.preTriggerSamples
+
+        self.voltage_range = voltage_range
 
         self.chandle = ctypes.c_int16()
         self.status = {}
         self.maxADC = ctypes.c_int16(32767)
-
-        self.timeIntervalns = None
 
         self.trigger_threshold = trigger  # mV
         self.bufferA = None
         self.bufferB = None
         self.chARange = None
         self.chBRange = None
-        
-        print()
-        print("----- Setting up Picoscope with parameters : ")
-        print("Aquire Time = ", aquire_time, "s")
-        print("Sampling Frequency = ", 80 / (self.timebase+1), "MHz,  Step size = ", (self.timebase+1)*12.5, " ns" )
-        print("Total Points = ", self.maxSamples)
-        print("Timebase = ", self.timebase)
-        print("----------")
-        print()
 
         self.initialize_picoscope()
+
+
+        print(f"Sampling Frequency : Desired {sampling_freq:.2f} MHz - Real {self.real_sampling_freq} MHz   ( timebase : {self.timebase} )")
+        print(f"Aquire Time : Desired {aquire_time*1e3:.2f} ms - Real {self.maxSamples * self.dt * 1e3:.2f} ms  ( Number of Samples : {self.desired_num_sample}, max 3900)")
+        print("=================================================")
 
 
     def __del__(self):
@@ -83,6 +82,7 @@ class Picoscope_Wrapper:
 
         self.chandle = ctypes.c_int16(self.status["openUnit"])
 
+
         # ----------
         # Setup Channels, Trigger, Time
         # ----------
@@ -92,7 +92,7 @@ class Picoscope_Wrapper:
         channel = PS2000_CHANNEL_A = 0
         enabled = 1
         coupling_type = PS2000_DC = 1
-        self.chARange = PS2000_2V = 7
+        self.chARange = self.voltage_range
         self.status["setChA"] = ps.ps2000_set_channel(handle, channel, enabled, coupling_type, self.chARange)
         assert_pico2000_ok(self.status["setChA"])
 
@@ -101,7 +101,7 @@ class Picoscope_Wrapper:
         channel = PS2000_CHANNEL_B = 1
         enabled = 1
         coupling_type = PS2000_DC = 1
-        self.chBRange = PS2000_2V = 7
+        self.chBRange = self.voltage_range
         self.status["setChB"] = ps.ps2000_set_channel(handle, channel, enabled, coupling_type, self.chBRange)
         assert_pico2000_ok(self.status["setChB"])
 
@@ -112,71 +112,31 @@ class Picoscope_Wrapper:
         direction = PS2000_RISING = 0
         delay = 0 # s
         autoTrigger_ms = 100
-        self.status["trigger"] = ps.ps2000_set_simple_trigger(handle, source, threshold, direction, delay, autoTrigger_ms )
+        self.status["trigger"] = ps.ps2000_set_trigger(handle, source, threshold, direction, delay, autoTrigger_ms )
         assert_pico2000_ok(self.status["trigger"])
 
-        
-        # Set number of pre and post trigger samples to be collected
-        preTriggerSamples = 1000
-        postTriggerSamples = 1000
-        self.maxSamples = preTriggerSamples + postTriggerSamples
 
         # ----- Setup Timebase
-        timeInterval = ctypes.c_int32()
+        self.timeInterval = ctypes.c_int32()
         timeUnits = ctypes.c_int32()
         oversample = ctypes.c_int16(1)
         maxSamplesReturn = ctypes.c_int32()
 
         handle = self.chandle
-        self.timebase = self.timebase
+        timebase = self.timebase
         noSamples = self.maxSamples
-        pointer_to_timeInterval = ctypes.byref(timeInterval)
+        pointer_to_timeInterval = ctypes.byref(self.timeInterval)
         pointer_to_timeUnits = ctypes.byref(timeUnits)
         self.oversample = oversample
         pointer_to_maxSamples = ctypes.byref(maxSamplesReturn)
 
-        self.status["getTimebase2"] = ps.ps2000_get_timebase(handle, self.timebase, noSamples, pointer_to_timeInterval, pointer_to_timeUnits, oversample, pointer_to_maxSamples)
-        assert_pico2000_ok(self.status["getTimebase2"])
+        self.status["getTimebase"] = ps.ps2000_get_timebase(handle, timebase, noSamples, pointer_to_timeInterval, pointer_to_timeUnits, oversample, pointer_to_maxSamples)
+        assert_pico2000_ok(self.status["getTimebase"])
 
-        # # ----------
-        # # Setup Memory and Buffers
-        # # ----------
-
-        # # ----- Set  up memory segments
-        # handle = self.chandle
-        # nSegments = 10
-        # nMaxSamples = ctypes.c_int32(0)
-        # self.status["setMemorySegments"] = ps.ps2000MemorySegments(self.chandle, 10, ctypes.byref(nMaxSamples))
-        # assert_pico2000_ok(self.status["setMemorySegments"])
-
-        # # ----- Set number of captures
-        # handle = self.chandle
-        # nCaptures = 1
-        # self.status["SetNoOfCaptures"] = ps.ps2000SetNoOfCaptures(handle, nCaptures)
-        # assert_pico2000_ok(self.status["SetNoOfCaptures"])
-
-        # # ----- Create buffers
-        # self.bufferA = (ctypes.c_int16 * self.maxSamples)()
-        # self.bufferB = (ctypes.c_int16 * self.maxSamples)()
-
-        # # ----- Assign buffers
-        # handle = self.chandle
-        # channelA = PS2000_CHANNEL_A = 0
-        # channelB = PS2000_CHANNEL_B = 1
-        # bufferLength = self.maxSamples
-        # mode = PS2000_RATIO_MODE_NONE = 0
-
-        # self.status["setDataBufferA"] = ps.ps2000SetDataBuffer(handle, PS2000_CHANNEL_A, ctypes.byref(self.bufferA), bufferLength)
-        # self.status["setDataBufferB"] = ps.ps2000SetDataBuffer(handle, PS2000_CHANNEL_B, ctypes.byref(self.bufferB), bufferLength)
-
-
-
-    ############## PMD mandatory methods
 
     def get_the_x_axis(self):
-        print("Tut")
-        return 0
-        # return self.data_transfer.time_data().magnitude
+        time = np.linspace(0, ((self.no_values.value)-1) * self.timeInterval.value * 1e-9, self.no_values.value)
+        return time
 
 
     def start_a_grab_snap(self):
@@ -210,32 +170,25 @@ class Picoscope_Wrapper:
         bufferA = (ctypes.c_int16 * self.maxSamples)()
         bufferB = (ctypes.c_int16 * self.maxSamples)()
 
-
         # ---- Collect data from buffer
         handle = self.chandle
         pointer_to_bufferA = ctypes.byref(bufferA)
         pointer_to_bufferB = ctypes.byref(bufferB)
         pointer_to_oversample = ctypes.byref(self.oversample)
-        no_values = ctypes.c_int32(self.maxSamples)
+        self.no_values = ctypes.c_int32(self.maxSamples)
 
-        self.status["getValues"] = ps.ps2000_get_values(self.chandle, pointer_to_bufferA, pointer_to_bufferB, None, None, pointer_to_oversample, no_values)
+        self.status["getValues"] = ps.ps2000_get_values(self.chandle, pointer_to_bufferA, pointer_to_bufferB, None, None, pointer_to_oversample, self.no_values)
         assert_pico2000_ok(self.status["getValues"])
 
         # # convert from adc to mV
-        channelA_data =  adc2mV(self.bufferA, self.chARange, self.maxADC)
-        channelB_data =  adc2mV(self.bufferB, self.chBRange, self.maxADC)
+        channelA_data =  adc2mV(bufferA, self.chARange, self.maxADC)
+        channelB_data =  adc2mV(bufferB, self.chBRange, self.maxADC)
 
         # Create time data
-        time = np.linspace(0, ((no_values.value)-1) * self.timeIntervalns.value * 1e-9, no_values.value)
+        time = np.linspace(0, ((self.no_values.value)-1) * self.timeInterval.value * 1e-9, self.no_values.value)
 
         return time, [np.array(channelA_data), np.array(channelB_data)]
 
-    def set_timebase(self, aquire_time=None, sampling_freq=None):
-        if aquire_time: self.num_points = self.sampling_frequency*1e6 *aquire_time
-        elif sampling_freq: self.num_points = sampling_freq*1e6 *self.aquire_time
-
-        self.postTriggerSamples = int( self.num_points - self.preTriggerSamples)
-        self.maxSamples = int(self.preTriggerSamples + self.postTriggerSamples)
 
 
     def stop(self):
@@ -259,21 +212,36 @@ class Picoscope_Wrapper:
 
         except:
             hit_except = True
-            #if not exit(manager, *sys.exc_info()):
 
-                #raise
-        #finally:
-        #    if not hit_except:
-        #        exit(manager)
-        #        manager.close()
+
+    def get_closest_timebase(self):
+        shortest_dt = 10e-9           # 10 ns
+
+        estimate_dt = 1 / (self.desired_sampling_freq*1e6)
+        timebase = round( log2(estimate_dt / shortest_dt) )
+        self.dt = shortest_dt * 2**timebase
+        self.real_sampling_freq = (1 / self.dt ) *1e-6
+        
+        return timebase
+
+    def get_numSamples(self):
+        
+        shortest_dt = 10e-9
+        dt = shortest_dt * 2**self.timebase
+        self.desired_num_sample = int(self.aquire_time / dt)
+
+        if self.desired_num_sample>3900: print(f"==== Trace duration exceeds what is possible with this sampling frequency : {self.desired_num_sample} > 3900")
+        return min(self.desired_num_sample, 3900)
+
 
 
 if __name__=="__main__":
 
-    pico = Picoscope_Wrapper(aquire_time=.5, 
-                             sampling_freq=0.20, 
-                             trigger=500, 
-                             trigger_chan=1)
+    pico = Picoscope_Wrapper(aquire_time=.01, 
+                            sampling_freq=5, 
+                            trigger=500, 
+                            trigger_chan=1, 
+                            voltage_range=5)
     
     time, data = pico.start_a_grab_snap()
 
@@ -281,6 +249,9 @@ if __name__=="__main__":
     data_B = data[1]
 
     import matplotlib.pyplot as plt
+    print(f"Duration : {time[-1]-time[0]}")
+    print(f"Samplign freq : {len(data_A)/(time[-1]-time[1]) * 1e-6 } MHz" )
+    print(f"Step : {(time[1]-time[0])*1e6} us")
     plt.plot(time, data_A)
     plt.plot(time, data_B)
     plt.show()
