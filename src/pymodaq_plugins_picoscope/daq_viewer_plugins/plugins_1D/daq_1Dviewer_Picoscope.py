@@ -163,10 +163,10 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         """
         time, channels = self.controller.start_a_grab_snap()
 
-        ChannelA = channels[0]
-        ChannelB = channels[1]
+        ChannelA = channels[0]/1000 # Convert to Volts
+        ChannelB = channels[1]/1000 # Convert to Volts
 
-        self.x_axis = Axis(data=self.controller.get_the_x_axis(), label='Time', units="s", index=0)
+        self.x_axis = Axis(data=time, label='Time', units="s", index=0) #self.controller.get_the_x_axis()
 
         dwa1D = DataFromPlugins(name='Channel B', data=[ChannelA, ChannelB], dim='Data1D', labels=['Channel A', 'Channel B'], do_plot=True, axes=[self.x_axis])
 
@@ -188,15 +188,8 @@ class DAQ_1DViewer_Picoscope(DAQ_Viewer_base):
         self.dte_signal.emit(DataToExport('myplugin',
                                           data=[DataFromPlugins(name='Mock1', data=data_tot,
                                                                 dim='Data1D', labels=['dat0', 'data1'])]))
-
     def stop(self):
-        """Stop the current grab hardware wise if necessary"""
-        ## TODO for your custom plugin
-        raise NotImplemented  # when writing your own plugin remove this line
-        self.controller.your_method_to_stop_acquisition()  # when writing your own plugin replace this line
-        self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
-        ##############################
-        return ''
+        return ''   # PyMoDAQ expects a string return value from stop()
 
 
 

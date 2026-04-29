@@ -17,8 +17,19 @@ from math import *
 class Picoscope_Wrapper:
 
     ############## My methods
+    # In the old wrapper __init__, add the missing kwargs:
+    def __init__(self, aquire_time=.5, sampling_freq=0.20, 
+                trigger=500,           # kept for backward compat
+                trigger_chan=1, 
+                voltage_range=6,
+                trigger_level_mv=None,  # new alias
+                **kwargs               # absorb any other extras silently
+                ) -> None:
+        
+        # trigger_level_mv overrides trigger if provided
+        if trigger_level_mv is not None:
+            trigger = trigger_level_mv
 
-    def __init__(self, aquire_time=.5, sampling_freq=0.20, trigger=500, trigger_chan=1, voltage_range=6) -> None:
         """
         Max Sampling Freq = 80 MHz
         """
@@ -105,6 +116,18 @@ class Picoscope_Wrapper:
         self.status["setChB"] = ps.ps2000_set_channel(handle, channel, enabled, coupling_type, self.chBRange)
         assert_pico2000_ok(self.status["setChB"])
 
+        # ----- Set up simple Trigger — use actual trigger_chan_number
+        handle = self.chandle
+        source = self.trigger_chan_number   # was hardcoded to 1
+        threshold = mV2adc(self.trigger_threshold, self.chBRange, self.maxADC)
+        direction = PS2000_RISING = 0
+        delay = 0
+        autoTrigger_ms = 500   # was 100ms — increase so it doesn't hang on slow signals
+        self.status["trigger"] = ps.ps2000_set_trigger(
+            handle, source, threshold, direction, delay, autoTrigger_ms
+        )
+        assert_pico2000_ok(self.status["trigger"])
+        """
         # ----- Set up simple Trigger
         handle = self.chandle
         source = PS2000_CHANNEL_B = 1
@@ -114,6 +137,7 @@ class Picoscope_Wrapper:
         autoTrigger_ms = 100
         self.status["trigger"] = ps.ps2000_set_trigger(handle, source, threshold, direction, delay, autoTrigger_ms )
         assert_pico2000_ok(self.status["trigger"])
+        """
 
 
         # ----- Setup Timebase
@@ -232,6 +256,33 @@ class Picoscope_Wrapper:
 
         if self.desired_num_sample>3900: print(f"==== Trace duration exceeds what is possible with this sampling frequency : {self.desired_num_sample} > 3900")
         return min(self.desired_num_sample, 3900)
+    
+    ### configure built-in signal generator (AWG) for testing purposes
+    def setup_sig_gen(self, wave_type=0, freq_hz=1000.0, pk2pk_uv=2_000_000, offset_uv=0):
+        from picosdk.ps2000 import ps2000
+
+        print(f"\n[WRAPPER setup_sig_gen] wave={wave_type}, freq={freq_hz}, "
+            f"pk2pk_uv={pk2pk_uv}, offset_uv={offset_uv}")
+
+        # ps2000 SDK expects specific types — NO ctypes wrapping for wave_type and frequencies
+        status = ps2000.ps2000_set_sig_gen_built_in(
+            self.chandle,
+            int(offset_uv),        # offsetVoltage  → plain int
+            int(pk2pk_uv),         # pkToPk         → plain int
+            int(wave_type),        # waveType       → plain int (NOT c_int16)
+            float(freq_hz),        # startFrequency → plain float
+            float(freq_hz),        # stopFrequency  → plain float
+            float(0),              # increment
+            float(0),              # dwellTime
+            int(0),                # sweepType
+            int(0)                 # sweeps
+        )
+        print(f"[WRAPPER setup_sig_gen] SDK returned status: {status}")
+        #assert_pico2000_ok(status)
+
+    def stop_sig_gen(self):
+        """Stop the signal generator by setting amplitude to 0."""
+        self.setup_sig_gen(wave_type=0, freq_hz=1000, pk2pk_uv=0, offset_uv=0)
 
 
 
